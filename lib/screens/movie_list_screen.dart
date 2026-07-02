@@ -23,7 +23,6 @@ class _MediaListScreenState extends State<MediaListScreen> {
   List<MediaItem> _items = [];
   String _errorMessage = '';
 
-  // İç içe klasörlerde gezinmek için mevcut yolları bir listede tutuyoruz
   final List<String> _pathHistory = [];
 
   final FocusNode _refreshFocusNode = FocusNode();
@@ -58,7 +57,6 @@ class _MediaListScreenState extends State<MediaListScreen> {
       );
       if (!mounted) return;
 
-      // Klasörün içindeysek en başa bir "Geri Dön" öğesi ekliyoruz
       if (_pathHistory.isNotEmpty) {
         items.insert(
           0,
@@ -103,17 +101,14 @@ class _MediaListScreenState extends State<MediaListScreen> {
 
   void _handleItemPress(MediaItem item) {
     if (item.path == "..") {
-      // Geri Dön'e basıldı
       if (_pathHistory.isNotEmpty) {
         _pathHistory.removeLast();
         _loadMedia();
       }
     } else if (item.isFolder) {
-      // Bir klasöre girildi
       _pathHistory.add(item.path);
       _loadMedia();
     } else {
-      // Filme tıklandı, oynatıcıya gönder
       context.pushNamed('player', extra: item);
     }
   }
@@ -159,25 +154,18 @@ class _MediaListScreenState extends State<MediaListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // PopScope ile kumandadaki donanımsal Geri (Back) tuşunu dinliyoruz
     return PopScope(
-      // Sadece ana dizindeysek (geçmiş boşsa) uygulamadan çıkışa izin ver
       canPop: _pathHistory.isEmpty,
-      // DEĞİŞİKLİK BURADA: onPopInvoked yerine onPopInvokedWithResult kullanıldı
       onPopInvokedWithResult: (bool didPop, dynamic result) {
-        // Eğer didPop true ise sistem zaten geriye gitmiştir (ana dizindeyizdir)
         if (didPop) return;
 
-        // Eğer didPop false ise (alt klasördeyiz demektir), üst klasöre dön
         if (_pathHistory.isNotEmpty) {
           _pathHistory.removeLast();
           _loadMedia();
         }
       },
       child: Scaffold(
-        backgroundColor: const Color(
-          0xFF0F1115,
-        ), // Daha koyu profesyonel arka plan
+        backgroundColor: const Color(0xFF0F1115),
         body: SafeArea(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
@@ -232,7 +220,6 @@ class _MediaListScreenState extends State<MediaListScreen> {
           child: CircularProgressIndicator(color: Colors.blueAccent),
         );
       case _LoadState.error:
-        // BURASI DÜZELTİLDİ: Orijinal hata arayüzü geri getirildi
         return Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,

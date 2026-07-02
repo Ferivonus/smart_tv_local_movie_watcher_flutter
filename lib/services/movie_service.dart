@@ -14,9 +14,7 @@ class MediaService {
   static const String baseUrl = 'http://192.168.1.5:8080';
   static const String apiUrl = '$baseUrl/api/movies';
 
-  // "folderPath" parametresi ile hangi klasörün içini okuyacağımızı belirtiyoruz
   Future<List<MediaItem>> fetchMedia({String folderPath = ''}) async {
-    // Eğer klasör yolu varsa API'ye ?path=... şeklinde ekliyoruz
     final String urlString = folderPath.isEmpty
         ? apiUrl
         : '$apiUrl?path=${Uri.encodeQueryComponent(folderPath)}';
@@ -45,7 +43,6 @@ class MediaService {
       for (final item in jsonList) {
         final parsedItem = MediaItem.fromJson(item);
 
-        // Sunucudan gelen URL'lerin başına baseUrl ekliyoruz ki tam link olsun
         items.add(
           MediaItem(
             title: parsedItem.title,

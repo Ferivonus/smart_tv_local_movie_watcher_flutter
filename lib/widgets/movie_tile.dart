@@ -25,7 +25,6 @@ class _MediaTileState extends State<MediaTile> {
 
   @override
   Widget build(BuildContext context) {
-    // "Geri Dön" butonu mu yoksa normal içerik mi kontrolü
     final isBackButton = widget.item.path == "..";
 
     return Focus(
@@ -59,7 +58,6 @@ class _MediaTileState extends State<MediaTile> {
       },
       child: GestureDetector(
         onTap: widget.onPressed,
-        // Profesyonel Büyüme (Scale) Efekti
         child: AnimatedScale(
           scale: _isFocused ? 1.08 : 1.0,
           duration: const Duration(milliseconds: 200),
@@ -83,16 +81,13 @@ class _MediaTileState extends State<MediaTile> {
                     ]
                   : [],
             ),
-            // İçeriği ClipRRect ile yuvarlıyoruz ki taşmasın
             child: ClipRRect(
               borderRadius: BorderRadius.circular(13),
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  // 1. ARKA PLAN: Resim, Klasör İkonu veya Geri Dön İkonu
                   _buildBackground(isBackButton),
 
-                  // 2. YAZI İÇİN KOYU DEGRADE (Gradient): Okunabilirliği artırır
                   Positioned(
                     bottom: 0,
                     left: 0,
@@ -109,7 +104,6 @@ class _MediaTileState extends State<MediaTile> {
                     ),
                   ),
 
-                  // 3. BAŞLIK VE İKONLAR
                   Positioned(
                     bottom: 12,
                     left: 12,
@@ -167,7 +161,6 @@ class _MediaTileState extends State<MediaTile> {
       );
     }
 
-    // Eğer kapak resmi varsa onu, yoksa varsayılan film ikonunu gösteriyoruz
     if (widget.item.thumbnailUrl != null) {
       return Image.network(
         widget.item.thumbnailUrl!,
