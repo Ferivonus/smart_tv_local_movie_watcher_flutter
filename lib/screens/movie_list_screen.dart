@@ -1,27 +1,30 @@
+import 'package:anime_film_isle/models/movie.dart';
+import 'package:anime_film_isle/services/movie_service.dart';
+import 'package:anime_film_isle/widgets/movie_tile.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
-import '../models/movie.dart';
-import '../services/movie_service.dart';
-import '../widgets/movie_tile.dart';
 import '../widgets/tv_button.dart';
 
 enum _LoadState { loading, error, loaded }
 
-class MovieListScreen extends StatefulWidget {
-  const MovieListScreen({super.key});
+class MediaListScreen extends StatefulWidget {
+  const MediaListScreen({super.key});
 
   @override
-  State<MovieListScreen> createState() => _MovieListScreenState();
+  State<MediaListScreen> createState() => _MediaListScreenState();
 }
 
-class _MovieListScreenState extends State<MovieListScreen> {
-  final MovieService _movieService = MovieService();
+class _MediaListScreenState extends State<MediaListScreen> {
+  final MediaService _mediaService = MediaService();
 
   _LoadState _state = _LoadState.loading;
-  List<Movie> _movies = [];
+  List<MediaItem> _items = [];
   String _errorMessage = '';
+
+  // İç içe klasörlerde gezinmek için mevcut yolları bir listede tutuyoruz
+  final List<String> _pathHistory = [];
 
   final FocusNode _refreshFocusNode = FocusNode();
   List<FocusNode> _tileFocusNodes = [];
@@ -29,7 +32,7 @@ class _MovieListScreenState extends State<MovieListScreen> {
   @override
   void initState() {
     super.initState();
-    _loadMovies();
+    _loadMedia();
   }
 
   @override
@@ -41,25 +44,38 @@ class _MovieListScreenState extends State<MovieListScreen> {
     super.dispose();
   }
 
-  Future<void> _loadMovies() async {
+  String get _currentFolderPath =>
+      _pathHistory.isEmpty ? '' : _pathHistory.last;
+
+  Future<void> _loadMedia() async {
     setState(() {
       _state = _LoadState.loading;
     });
 
     try {
-      final movies = await _movieService.fetchMovies();
+      final items = await _mediaService.fetchMedia(
+        folderPath: _currentFolderPath,
+      );
       if (!mounted) return;
+
+      // Klasörün içindeysek en başa bir "Geri Dön" öğesi ekliyoruz
+      if (_pathHistory.isNotEmpty) {
+        items.insert(
+          0,
+          const MediaItem(title: 'Üst Klasöre Dön', isFolder: true, path: '..'),
+        );
+      }
 
       for (final node in _tileFocusNodes) {
         node.dispose();
       }
-      _tileFocusNodes = List.generate(movies.length, (_) => FocusNode());
+      _tileFocusNodes = List.generate(items.length, (_) => FocusNode());
 
       setState(() {
-        _movies = movies;
-        if (movies.isEmpty) {
+        _items = items;
+        if (items.isEmpty) {
           _state = _LoadState.error;
-          _errorMessage = 'Sunucuda oynatılabilir film bulunamadı.';
+          _errorMessage = 'Bu klasörde içerik bulunamadı.';
         } else {
           _state = _LoadState.loaded;
         }
@@ -67,7 +83,7 @@ class _MovieListScreenState extends State<MovieListScreen> {
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        if (movies.isNotEmpty) {
+        if (items.isNotEmpty) {
           _tileFocusNodes.first.requestFocus();
         } else {
           _refreshFocusNode.requestFocus();
@@ -85,8 +101,21 @@ class _MovieListScreenState extends State<MovieListScreen> {
     }
   }
 
-  void _openMovie(Movie movie) {
-    context.pushNamed('player', extra: movie);
+  void _handleItemPress(MediaItem item) {
+    if (item.path == "..") {
+      // Geri Dön'e basıldı
+      if (_pathHistory.isNotEmpty) {
+        _pathHistory.removeLast();
+        _loadMedia();
+      }
+    } else if (item.isFolder) {
+      // Bir klasöre girildi
+      _pathHistory.add(item.path);
+      _loadMedia();
+    } else {
+      // Filme tıklandı, oynatıcıya gönder
+      context.pushNamed('player', extra: item);
+    }
   }
 
   int _crossAxisCountFor(double width) {
@@ -94,15 +123,11 @@ class _MovieListScreenState extends State<MovieListScreen> {
     return count.clamp(2, 6);
   }
 
-  KeyEventResult _handleTileNav(
-    int index,
-    int crossAxisCount,
-    KeyEvent event,
-  ) {
+  KeyEventResult _handleTileNav(int index, int crossAxisCount, KeyEvent event) {
     final key = event.logicalKey;
 
     if (key == LogicalKeyboardKey.arrowRight) {
-      if ((index + 1) % crossAxisCount != 0 && index + 1 < _movies.length) {
+      if ((index + 1) % crossAxisCount != 0 && index + 1 < _items.length) {
         _tileFocusNodes[index + 1].requestFocus();
       }
       return KeyEventResult.handled;
@@ -115,7 +140,7 @@ class _MovieListScreenState extends State<MovieListScreen> {
     }
     if (key == LogicalKeyboardKey.arrowDown) {
       final target = index + crossAxisCount;
-      if (target < _movies.length) {
+      if (target < _items.length) {
         _tileFocusNodes[target].requestFocus();
       }
       return KeyEventResult.handled;
@@ -134,45 +159,66 @@ class _MovieListScreenState extends State<MovieListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'İzlenebilecek Filmler',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
+    // PopScope ile kumandadaki donanımsal Geri (Back) tuşunu dinliyoruz
+    return PopScope(
+      // Sadece ana dizindeysek (geçmiş boşsa) uygulamadan çıkışa izin ver
+      canPop: _pathHistory.isEmpty,
+      // DEĞİŞİKLİK BURADA: onPopInvoked yerine onPopInvokedWithResult kullanıldı
+      onPopInvokedWithResult: (bool didPop, dynamic result) {
+        // Eğer didPop true ise sistem zaten geriye gitmiştir (ana dizindeyizdir)
+        if (didPop) return;
+
+        // Eğer didPop false ise (alt klasördeyiz demektir), üst klasöre dön
+        if (_pathHistory.isNotEmpty) {
+          _pathHistory.removeLast();
+          _loadMedia();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(
+          0xFF0F1115,
+        ), // Daha koyu profesyonel arka plan
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _currentFolderPath.isEmpty
+                            ? 'Medya Kütüphanesi'
+                            : 'Klasör: ${_currentFolderPath.split('/').last}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2,
+                        ),
                       ),
                     ),
-                  ),
-                  TvButton(
-                    focusNode: _refreshFocusNode,
-                    icon: Icons.refresh_rounded,
-                    size: 34,
-                    onPressed: _loadMovies,
-                    onNavigationKey: (event) {
-                      if (event.logicalKey == LogicalKeyboardKey.arrowDown &&
-                          _movies.isNotEmpty) {
-                        _tileFocusNodes.first.requestFocus();
-                        return KeyEventResult.handled;
-                      }
-                      return KeyEventResult.ignored;
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              Expanded(child: _buildBody()),
-            ],
+                    TvButton(
+                      focusNode: _refreshFocusNode,
+                      icon: Icons.refresh_rounded,
+                      size: 34,
+                      onPressed: _loadMedia,
+                      onNavigationKey: (event) {
+                        if (event.logicalKey == LogicalKeyboardKey.arrowDown &&
+                            _items.isNotEmpty) {
+                          _tileFocusNodes.first.requestFocus();
+                          return KeyEventResult.handled;
+                        }
+                        return KeyEventResult.ignored;
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 32),
+                Expanded(child: _buildBody()),
+              ],
+            ),
           ),
         ),
       ),
@@ -186,6 +232,7 @@ class _MovieListScreenState extends State<MovieListScreen> {
           child: CircularProgressIndicator(color: Colors.blueAccent),
         );
       case _LoadState.error:
+        // BURASI DÜZELTİLDİ: Orijinal hata arayüzü geri getirildi
         return Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -214,19 +261,19 @@ class _MovieListScreenState extends State<MovieListScreen> {
           builder: (context, constraints) {
             final crossAxisCount = _crossAxisCountFor(constraints.maxWidth);
             return GridView.builder(
-              itemCount: _movies.length,
+              itemCount: _items.length,
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: crossAxisCount,
-                mainAxisSpacing: 24,
-                crossAxisSpacing: 24,
-                childAspectRatio: 0.85,
+                mainAxisSpacing: 32,
+                crossAxisSpacing: 32,
+                childAspectRatio: 0.7,
               ),
               itemBuilder: (context, index) {
-                final movie = _movies[index];
-                return MovieTile(
+                final item = _items[index];
+                return MediaTile(
                   focusNode: _tileFocusNodes[index],
-                  title: movie.title,
-                  onPressed: () => _openMovie(movie),
+                  item: item,
+                  onPressed: () => _handleItemPress(item),
                   onNavigationKey: (event) =>
                       _handleTileNav(index, crossAxisCount, event),
                 );

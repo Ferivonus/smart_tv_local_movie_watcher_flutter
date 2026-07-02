@@ -9,7 +9,7 @@ import '../widgets/tv_button.dart';
 import '../widgets/tv_thumbnail_button.dart';
 
 class VideoPlayerScreen extends StatefulWidget {
-  final Movie movie;
+  final MediaItem movie;
 
   const VideoPlayerScreen({super.key, required this.movie});
 
@@ -55,10 +55,18 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _isInitialized = false;
       _hasError = false;
     });
+    //todo: kontrol et.
+    final String? movieUrl = widget.movie.url;
+    if (movieUrl == null || movieUrl.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _hasError = true;
+        _isInitialized = false;
+      });
+      return;
+    }
 
-    _controller = VideoPlayerController.networkUrl(
-      Uri.parse(widget.movie.url),
-    );
+    _controller = VideoPlayerController.networkUrl(Uri.parse(movieUrl));
 
     try {
       await _controller.initialize();

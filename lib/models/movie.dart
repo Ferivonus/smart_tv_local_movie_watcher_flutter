@@ -1,14 +1,25 @@
-class Movie {
+class MediaItem {
   final String title;
-  final String url;
+  final String? url;
+  final String? thumbnailUrl;
+  final bool isFolder;
+  final String path;
 
-  const Movie({required this.title, required this.url});
+  const MediaItem({
+    required this.title,
+    this.url,
+    this.thumbnailUrl,
+    required this.isFolder,
+    required this.path,
+  });
 
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is Movie && other.title == title && other.url == url;
-
-  @override
-  int get hashCode => Object.hash(title, url);
+  factory MediaItem.fromJson(Map<String, dynamic> json) {
+    return MediaItem(
+      title: json['title'] ?? '',
+      url: json['url'],
+      thumbnailUrl: json['thumbnail_url'],
+      isFolder: json['is_folder'] ?? false,
+      path: json['path'] ?? '',
+    );
+  }
 }

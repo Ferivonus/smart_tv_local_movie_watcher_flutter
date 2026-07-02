@@ -11,14 +11,14 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: '/',
       name: 'movies',
-      builder: (context, state) => const MovieListScreen(),
+      builder: (context, state) => const MediaListScreen(),
     ),
     GoRoute(
       path: '/player',
       name: 'player',
       builder: (context, state) {
         final extra = state.extra;
-        if (extra is! Movie) {
+        if (extra is! MediaItem) {
           return const MovieNotFoundScreen();
         }
         return VideoPlayerScreen(movie: extra);

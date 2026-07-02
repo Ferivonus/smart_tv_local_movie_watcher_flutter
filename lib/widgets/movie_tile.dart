@@ -1,29 +1,33 @@
+import 'package:anime_film_isle/models/movie.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-class MovieTile extends StatefulWidget {
+class MediaTile extends StatefulWidget {
   final FocusNode focusNode;
-  final String title;
+  final MediaItem item;
   final VoidCallback onPressed;
   final KeyEventResult Function(KeyEvent event)? onNavigationKey;
 
-  const MovieTile({
+  const MediaTile({
     super.key,
     required this.focusNode,
-    required this.title,
+    required this.item,
     required this.onPressed,
     this.onNavigationKey,
   });
 
   @override
-  State<MovieTile> createState() => _MovieTileState();
+  State<MediaTile> createState() => _MediaTileState();
 }
 
-class _MovieTileState extends State<MovieTile> {
+class _MediaTileState extends State<MediaTile> {
   bool _isFocused = false;
 
   @override
   Widget build(BuildContext context) {
+    // "Geri Dön" butonu mu yoksa normal içerik mi kontrolü
+    final isBackButton = widget.item.path == "..";
+
     return Focus(
       focusNode: widget.focusNode,
       onFocusChange: (hasFocus) {
@@ -34,7 +38,8 @@ class _MovieTileState extends State<MovieTile> {
           Scrollable.ensureVisible(
             context,
             alignment: 0.5,
-            duration: const Duration(milliseconds: 200),
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
           );
         }
       },
@@ -54,51 +59,133 @@ class _MovieTileState extends State<MovieTile> {
       },
       child: GestureDetector(
         onTap: widget.onPressed,
-        child: AnimatedContainer(
+        // Profesyonel Büyüme (Scale) Efekti
+        child: AnimatedScale(
+          scale: _isFocused ? 1.08 : 1.0,
           duration: const Duration(milliseconds: 200),
-          decoration: BoxDecoration(
-            color: _isFocused
-                ? Colors.blueAccent.withValues(alpha: 0.85)
-                : Colors.white10,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: _isFocused ? Colors.white : Colors.white24,
-              width: _isFocused ? 3 : 1,
+          curve: Curves.easeOut,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: _isFocused ? Colors.white : Colors.transparent,
+                width: 3,
+              ),
+              boxShadow: _isFocused
+                  ? [
+                      const BoxShadow(
+                        color: Colors.black54,
+                        blurRadius: 20,
+                        spreadRadius: 5,
+                        offset: Offset(0, 10),
+                      ),
+                    ]
+                  : [],
             ),
-            boxShadow: _isFocused
-                ? [
-                    const BoxShadow(
-                      color: Colors.blueAccent,
-                      blurRadius: 20,
-                      spreadRadius: 2,
+            // İçeriği ClipRRect ile yuvarlıyoruz ki taşmasın
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(13),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // 1. ARKA PLAN: Resim, Klasör İkonu veya Geri Dön İkonu
+                  _buildBackground(isBackButton),
+
+                  // 2. YAZI İÇİN KOYU DEGRADE (Gradient): Okunabilirliği artırır
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    height: 100,
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                          colors: [Colors.black87, Colors.transparent],
+                        ),
+                      ),
                     ),
-                  ]
-                : [],
-          ),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.movie_creation_rounded,
-                size: 48,
-                color: _isFocused ? Colors.white : Colors.white54,
+                  ),
+
+                  // 3. BAŞLIK VE İKONLAR
+                  Positioned(
+                    bottom: 12,
+                    left: 12,
+                    right: 12,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (widget.item.isFolder && !isBackButton)
+                          const Icon(
+                            Icons.folder_rounded,
+                            color: Colors.white,
+                            size: 24,
+                          ),
+                        const SizedBox(height: 4),
+                        Text(
+                          widget.item.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: _isFocused
+                                ? FontWeight.bold
+                                : FontWeight.w500,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 12),
-              Text(
-                widget.title,
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: _isFocused ? Colors.white : Colors.white70,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
-                ),
-              ),
-            ],
+            ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildBackground(bool isBackButton) {
+    if (isBackButton) {
+      return Container(
+        color: Colors.white12,
+        child: const Icon(Icons.reply_rounded, color: Colors.white54, size: 64),
+      );
+    }
+
+    if (widget.item.isFolder) {
+      return Container(
+        color: Colors.blueAccent.withValues(alpha: 0.2),
+        child: const Icon(
+          Icons.folder_open_rounded,
+          color: Colors.blueAccent,
+          size: 72,
+        ),
+      );
+    }
+
+    // Eğer kapak resmi varsa onu, yoksa varsayılan film ikonunu gösteriyoruz
+    if (widget.item.thumbnailUrl != null) {
+      return Image.network(
+        widget.item.thumbnailUrl!,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => _fallbackIcon(),
+      );
+    }
+
+    return _fallbackIcon();
+  }
+
+  Widget _fallbackIcon() {
+    return Container(
+      color: Colors.white10,
+      child: const Icon(
+        Icons.movie_creation_rounded,
+        color: Colors.white24,
+        size: 64,
       ),
     );
   }

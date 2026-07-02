@@ -1,62 +1,67 @@
 import 'dart:convert';
+import 'package:anime_film_isle/models/movie.dart';
 import 'package:http/http.dart' as http;
 
-import '../models/movie.dart';
-
-class MovieServiceException implements Exception {
+class MediaServiceException implements Exception {
   final String message;
-  const MovieServiceException(this.message);
+  const MediaServiceException(this.message);
 
   @override
   String toString() => message;
 }
 
-class MovieService {
+class MediaService {
   static const String baseUrl = 'http://192.168.1.5:8080';
-
   static const String apiUrl = '$baseUrl/api/movies';
 
-  Future<List<Movie>> fetchMovies() async {
-    final Uri uri = Uri.parse(apiUrl);
+  // "folderPath" parametresi ile hangi klasörün içini okuyacağımızı belirtiyoruz
+  Future<List<MediaItem>> fetchMedia({String folderPath = ''}) async {
+    // Eğer klasör yolu varsa API'ye ?path=... şeklinde ekliyoruz
+    final String urlString = folderPath.isEmpty
+        ? apiUrl
+        : '$apiUrl?path=${Uri.encodeQueryComponent(folderPath)}';
+
+    final Uri uri = Uri.parse(urlString);
     late final http.Response response;
 
     try {
       response = await http.get(uri).timeout(const Duration(seconds: 10));
     } catch (_) {
-      throw const MovieServiceException(
-        '$baseUrl adresine bağlanılamadı. Sunucunun açık ve aynı ağda '
-        'olduğundan emin olun.',
+      throw const MediaServiceException(
+        'Sunucuya bağlanılamadı. Açık olduğundan emin olun.',
       );
     }
 
     if (response.statusCode != 200) {
-      throw MovieServiceException(
-        'Sunucu $apiUrl adresinde ${response.statusCode} hatası döndürdü.',
+      throw MediaServiceException(
+        'Sunucu ${response.statusCode} hatası döndürdü.',
       );
     }
 
     try {
       final List<dynamic> jsonList = jsonDecode(response.body);
-      final movies = <Movie>[];
+      final items = <MediaItem>[];
 
       for (final item in jsonList) {
-        final String title = item['title'];
-        final String relativeUrl = item['url'];
+        final parsedItem = MediaItem.fromJson(item);
 
-        final String fullUrl = '$baseUrl$relativeUrl';
-
-        movies.add(Movie(title: title, url: fullUrl));
+        // Sunucudan gelen URL'lerin başına baseUrl ekliyoruz ki tam link olsun
+        items.add(
+          MediaItem(
+            title: parsedItem.title,
+            url: parsedItem.url != null ? '$baseUrl${parsedItem.url}' : null,
+            thumbnailUrl: parsedItem.thumbnailUrl != null
+                ? '$baseUrl${parsedItem.thumbnailUrl}'
+                : null,
+            isFolder: parsedItem.isFolder,
+            path: parsedItem.path,
+          ),
+        );
       }
 
-      movies.sort(
-        (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
-      );
-
-      return movies;
+      return items;
     } catch (e) {
-      throw MovieServiceException(
-        'Film verileri okunurken bir hata oluştu: $e',
-      );
+      throw MediaServiceException('Medya verileri okunurken hata oluştu: $e');
     }
   }
 }
