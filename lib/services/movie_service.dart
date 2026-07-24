@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:isolate';
 import 'package:anime_film_isle/models/movie.dart';
 import 'package:http/http.dart' as http;
 
@@ -37,28 +38,40 @@ class MediaService {
     }
 
     try {
-      final List<dynamic> jsonList = jsonDecode(response.body);
-      final items = <MediaItem>[];
-
-      for (final item in jsonList) {
-        final parsedItem = MediaItem.fromJson(item);
-
-        items.add(
-          MediaItem(
-            title: parsedItem.title,
-            url: parsedItem.url != null ? '$baseUrl${parsedItem.url}' : null,
-            thumbnailUrl: parsedItem.thumbnailUrl != null
-                ? '$baseUrl${parsedItem.thumbnailUrl}'
-                : null,
-            isFolder: parsedItem.isFolder,
-            path: parsedItem.path,
-          ),
-        );
-      }
-
-      return items;
+      // JSON parsing ve memory mapping işlemini ayrı bir Isolate'e (Actor) taşıyoruz.
+      // Bu işlem UI thread'i bloklamadan arka planda çalışır ve tamamlandığında
+      // List<MediaItem> referansını ana Isolate'e transfer eder.
+      return await Isolate.run(() => _parseMediaItems(response.body));
     } catch (e) {
       throw MediaServiceException('Medya verileri okunurken hata oluştu: $e');
     }
+  }
+
+  /// Isolate içerisinde çalıştırılacak statik fonksiyon.
+  /// Top-level veya static olmalıdır ki ana sınıftaki (this) referansları
+  /// closure içerisine alıp gereksiz bellek kopyalamasına (serialization fail) yol açmasın.
+  static List<MediaItem> _parseMediaItems(String responseBody) {
+    final List<dynamic> jsonList = jsonDecode(responseBody);
+    final items = <MediaItem>[];
+
+    // Kapasite ön tahsisi (pre-allocation) yapılarak list grow overhead'i azaltılabilir,
+    // ancak dynamic JSON dizilerinde length her zaman güvenilir olmayabilir.
+    for (final item in jsonList) {
+      final parsedItem = MediaItem.fromJson(item);
+
+      items.add(
+        MediaItem(
+          title: parsedItem.title,
+          url: parsedItem.url != null ? '$baseUrl${parsedItem.url}' : null,
+          thumbnailUrl: parsedItem.thumbnailUrl != null
+              ? '$baseUrl${parsedItem.thumbnailUrl}'
+              : null,
+          isFolder: parsedItem.isFolder,
+          path: parsedItem.path,
+        ),
+      );
+    }
+
+    return items;
   }
 }

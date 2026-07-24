@@ -9,6 +9,9 @@ class TvThumbnailButton extends StatefulWidget {
   final VoidCallback onFocus;
   final KeyEventResult Function(KeyEvent event)? onNavigationKey;
 
+  // YENİ: Görsel URL'sini almak için parametre ekledik
+  final String? imageUrl;
+
   const TvThumbnailButton({
     super.key,
     required this.focusNode,
@@ -17,6 +20,7 @@ class TvThumbnailButton extends StatefulWidget {
     required this.onFocus,
     this.isActive = false,
     this.onNavigationKey,
+    this.imageUrl,
   });
 
   @override
@@ -83,6 +87,16 @@ class _TvThumbnailButtonState extends State<TvThumbnailButton> {
                     ),
                   ]
                 : [],
+            image: widget.imageUrl != null
+                ? DecorationImage(
+                    image: NetworkImage(widget.imageUrl!),
+                    fit: BoxFit.cover,
+                    colorFilter: ColorFilter.mode(
+                      Colors.black.withValues(alpha: 0.5),
+                      BlendMode.darken,
+                    ),
+                  )
+                : null,
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,

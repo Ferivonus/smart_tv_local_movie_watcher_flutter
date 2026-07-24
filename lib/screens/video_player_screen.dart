@@ -6,7 +6,6 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../models/movie.dart';
 import '../widgets/tv_button.dart';
-import '../widgets/tv_thumbnail_button.dart';
 
 class VideoPlayerScreen extends StatefulWidget {
   final MediaItem movie;
@@ -17,37 +16,52 @@ class VideoPlayerScreen extends StatefulWidget {
   State<VideoPlayerScreen> createState() => _VideoPlayerScreenState();
 }
 
-class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
+class _VideoPlayerScreenState extends State<VideoPlayerScreen>
+    with WidgetsBindingObserver {
   late VideoPlayerController _controller;
   bool _isInitialized = false;
   bool _hasError = false;
   bool _showControls = true;
   Timer? _hideTimer;
+  Timer? _feedbackTimer;
+
+  String _seekFeedback = "";
+  bool _showSeekFeedback = false;
+  bool _isScrubberFocused = false;
 
   final FocusNode _rootFocusNode = FocusNode();
   final FocusNode _replayFocusNode = FocusNode();
   final FocusNode _playPauseFocusNode = FocusNode();
   final FocusNode _forwardFocusNode = FocusNode();
+  final FocusNode _scrubberFocusNode = FocusNode();
 
   late final List<FocusNode> _controlFocusNodes;
-
-  final int _thumbnailCount = 10;
-  late List<FocusNode> _thumbnailNodes;
-
-  int _lastFocusedThumbnailIndex = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
     _controlFocusNodes = [
       _replayFocusNode,
       _playPauseFocusNode,
       _forwardFocusNode,
+      _scrubberFocusNode,
     ];
-    _thumbnailNodes = List.generate(_thumbnailCount, (index) => FocusNode());
 
     _initializePlayer();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      if (_isInitialized && _controller.value.isPlaying) {
+        _controller.pause();
+        WakelockPlus.disable();
+        if (mounted) setState(() {});
+      }
+    }
   }
 
   Future<void> _initializePlayer() async {
@@ -55,7 +69,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _isInitialized = false;
       _hasError = false;
     });
-    //todo: kontrol et.
+
     final String? movieUrl = widget.movie.url;
     if (movieUrl == null || movieUrl.isEmpty) {
       if (!mounted) return;
@@ -127,8 +141,23 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   void _startHideTimer() {
     _hideTimer?.cancel();
     _hideTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted && _controller.value.isPlaying) {
+      if (mounted && _controller.value.isPlaying && !_isScrubberFocused) {
         _hideControlsPanel();
+      }
+    });
+  }
+
+  void _triggerSeekFeedback(int seconds) {
+    _feedbackTimer?.cancel();
+    setState(() {
+      _seekFeedback = seconds > 0 ? "+${seconds}s" : "${seconds}s";
+      _showSeekFeedback = true;
+    });
+    _feedbackTimer = Timer(const Duration(milliseconds: 600), () {
+      if (mounted) {
+        setState(() {
+          _showSeekFeedback = false;
+        });
       }
     });
   }
@@ -152,11 +181,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     if (newPosition < Duration.zero) newPosition = Duration.zero;
     if (newPosition > maxPosition) newPosition = maxPosition;
     _controller.seekTo(newPosition);
-    _startHideTimer();
-  }
-
-  void _seekToAbsolute(Duration position) {
-    _controller.seekTo(position);
+    _triggerSeekFeedback(seconds);
     _startHideTimer();
   }
 
@@ -186,31 +211,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowDown) {
-      final target = _lastFocusedThumbnailIndex.clamp(0, _thumbnailCount - 1);
-      _thumbnailNodes[target].requestFocus();
-      _startHideTimer();
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
-  }
-
-  KeyEventResult _handleThumbnailNav(int index, KeyEvent event) {
-    final key = event.logicalKey;
-
-    if (key == LogicalKeyboardKey.arrowLeft) {
-      if (index > 0) _thumbnailNodes[index - 1].requestFocus();
-      _startHideTimer();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.arrowRight) {
-      if (index < _thumbnailCount - 1) {
-        _thumbnailNodes[index + 1].requestFocus();
+      if (index != 3) {
+        _scrubberFocusNode.requestFocus();
       }
       _startHideTimer();
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowUp) {
-      _playPauseFocusNode.requestFocus();
+      if (index == 3) {
+        _playPauseFocusNode.requestFocus();
+      }
       _startHideTimer();
       return KeyEventResult.handled;
     }
@@ -219,16 +229,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _hideTimer?.cancel();
+    _feedbackTimer?.cancel();
     _controller.removeListener(_onControllerUpdate);
     _controller.dispose();
     _rootFocusNode.dispose();
     _replayFocusNode.dispose();
     _playPauseFocusNode.dispose();
     _forwardFocusNode.dispose();
-    for (var node in _thumbnailNodes) {
-      node.dispose();
-    }
+    _scrubberFocusNode.dispose();
     WakelockPlus.disable();
     super.dispose();
   }
@@ -264,7 +274,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        const CircularProgressIndicator(color: Colors.blueAccent),
+        const CircularProgressIndicator(color: Colors.redAccent),
         const SizedBox(height: 20),
         Text(
           "${widget.movie.title} yükleniyor...",
@@ -320,6 +330,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   }
 
   Widget _buildPlayer() {
+    final Size screenSize = MediaQuery.sizeOf(context);
+    final double safeHorizontal = screenSize.width * 0.05;
+    final double safeVertical = screenSize.height * 0.05;
+
     return Focus(
       focusNode: _rootFocusNode,
       autofocus: true,
@@ -365,9 +379,33 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             builder: (context, VideoPlayerValue value, child) {
               if (!value.isBuffering) return const SizedBox.shrink();
               return const Center(
-                child: CircularProgressIndicator(color: Colors.blueAccent),
+                child: CircularProgressIndicator(color: Colors.redAccent),
               );
             },
+          ),
+          Center(
+            child: AnimatedOpacity(
+              opacity: _showSeekFeedback ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 200),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.7),
+                  borderRadius: BorderRadius.circular(30),
+                ),
+                child: Text(
+                  _seekFeedback,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
           ),
           GestureDetector(
             onTap: () =>
@@ -376,55 +414,60 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             child: Container(color: Colors.transparent),
           ),
           if (_showControls)
-            Positioned.fill(
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
               child: AnimatedOpacity(
                 opacity: _showControls ? 1.0 : 0.0,
                 duration: const Duration(milliseconds: 300),
                 child: Container(
+                  padding: EdgeInsets.only(
+                    top: 120,
+                    bottom: safeVertical,
+                    left: safeHorizontal,
+                    right: safeHorizontal,
+                  ),
                   decoration: const BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.transparent,
-                        Colors.black87,
-                        Colors.black,
-                      ],
-                      stops: [0.4, 0.85, 1.0],
+                      colors: [Colors.transparent, Colors.black87],
+                      stops: [0.7, 1.0],
                     ),
                   ),
                   child: Column(
-                    mainAxisAlignment: MainAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           TvButton(
                             focusNode: _replayFocusNode,
-                            icon: Icons.replay_10,
-                            size: 50,
+                            icon: Icons.replay_10_rounded,
+                            size: 36,
                             onPressed: () => _seekRelative(-10),
                             onFocus: _startHideTimer,
                             onNavigationKey: (event) =>
                                 _handleControlNav(0, event),
                           ),
-                          const SizedBox(width: 40),
+                          const SizedBox(width: 48),
                           TvButton(
                             focusNode: _playPauseFocusNode,
                             icon: _controller.value.isPlaying
-                                ? Icons.pause_circle_filled
-                                : Icons.play_circle_filled,
-                            size: 70,
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
+                            size: 48,
                             onPressed: _togglePlayPause,
                             onFocus: _startHideTimer,
                             onNavigationKey: (event) =>
                                 _handleControlNav(1, event),
                           ),
-                          const SizedBox(width: 40),
+                          const SizedBox(width: 48),
                           TvButton(
                             focusNode: _forwardFocusNode,
-                            icon: Icons.forward_10,
-                            size: 50,
+                            icon: Icons.forward_10_rounded,
+                            size: 36,
                             onPressed: () => _seekRelative(10),
                             onFocus: _startHideTimer,
                             onNavigationKey: (event) =>
@@ -432,111 +475,97 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                           ),
                         ],
                       ),
-                      Padding(
-                        padding: const EdgeInsets.only(
-                          left: 40,
-                          right: 40,
-                          top: 30,
-                          bottom: 10,
-                        ),
-                        child: Row(
-                          children: [
-                            ValueListenableBuilder(
-                              valueListenable: _controller,
-                              builder:
-                                  (context, VideoPlayerValue value, child) {
-                                    return Text(
-                                      _formatDuration(value.position),
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    );
-                                  },
-                            ),
-                            const SizedBox(width: 20),
-                            Expanded(
-                              child: ExcludeFocus(
-                                child: VideoProgressIndicator(
-                                  _controller,
-                                  allowScrubbing: true,
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 10,
-                                  ),
-                                  colors: const VideoProgressColors(
-                                    playedColor: Colors.blueAccent,
-                                    bufferedColor: Colors.white38,
-                                    backgroundColor: Colors.white24,
+                      const SizedBox(height: 24),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          ValueListenableBuilder(
+                            valueListenable: _controller,
+                            builder: (context, VideoPlayerValue value, child) {
+                              return Text(
+                                _formatDuration(value.position),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              );
+                            },
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Focus(
+                              focusNode: _scrubberFocusNode,
+                              onFocusChange: (hasFocus) {
+                                setState(() {
+                                  _isScrubberFocused = hasFocus;
+                                });
+                                if (hasFocus) {
+                                  _startHideTimer();
+                                }
+                              },
+                              onKeyEvent: (node, event) {
+                                if (event is KeyDownEvent) {
+                                  if (event.logicalKey ==
+                                      LogicalKeyboardKey.arrowLeft) {
+                                    _seekRelative(-10);
+                                    return KeyEventResult.handled;
+                                  }
+                                  if (event.logicalKey ==
+                                      LogicalKeyboardKey.arrowRight) {
+                                    _seekRelative(10);
+                                    return KeyEventResult.handled;
+                                  }
+                                  if (event.logicalKey ==
+                                      LogicalKeyboardKey.arrowUp) {
+                                    _playPauseFocusNode.requestFocus();
+                                    _startHideTimer();
+                                    return KeyEventResult.handled;
+                                  }
+                                }
+                                return KeyEventResult.ignored;
+                              },
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                height: _isScrubberFocused ? 12 : 4,
+                                decoration: BoxDecoration(
+                                  boxShadow: _isScrubberFocused
+                                      ? [
+                                          const BoxShadow(
+                                            color: Colors.redAccent,
+                                            blurRadius: 10,
+                                            spreadRadius: 2,
+                                          ),
+                                        ]
+                                      : [],
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: VideoProgressIndicator(
+                                    _controller,
+                                    allowScrubbing: true,
+                                    padding: EdgeInsets.zero,
+                                    colors: const VideoProgressColors(
+                                      playedColor: Colors.redAccent,
+                                      bufferedColor: Colors.white24,
+                                      backgroundColor: Colors.white10,
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 20),
-                            Text(
-                              _formatDuration(_controller.value.duration),
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      SizedBox(
-                        height: 90,
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 30),
-                          child: Row(
-                            children: List.generate(_thumbnailCount, (index) {
-                              final durationSeconds =
-                                  _controller.value.duration.inSeconds > 0
-                                  ? _controller.value.duration.inSeconds
-                                  : 1;
-                              final segmentSeconds =
-                                  durationSeconds / _thumbnailCount;
-                              final targetTime = Duration(
-                                seconds: (segmentSeconds * index).round(),
-                              );
-
-                              return ValueListenableBuilder(
-                                valueListenable: _controller,
-                                builder:
-                                    (context, VideoPlayerValue value, child) {
-                                      final segmentStart = Duration(
-                                        seconds: (segmentSeconds * index)
-                                            .round(),
-                                      );
-                                      final segmentEnd = Duration(
-                                        seconds: (segmentSeconds * (index + 1))
-                                            .round(),
-                                      );
-                                      final isActive =
-                                          value.position >= segmentStart &&
-                                          value.position < segmentEnd;
-
-                                      return TvThumbnailButton(
-                                        focusNode: _thumbnailNodes[index],
-                                        timeLabel: _formatDuration(targetTime),
-                                        isActive: isActive,
-                                        onFocus: () {
-                                          _lastFocusedThumbnailIndex = index;
-                                          _startHideTimer();
-                                        },
-                                        onPressed: () =>
-                                            _seekToAbsolute(targetTime),
-                                        onNavigationKey: (event) =>
-                                            _handleThumbnailNav(index, event),
-                                      );
-                                    },
-                              );
-                            }),
                           ),
-                        ),
+                          const SizedBox(width: 16),
+                          Text(
+                            _formatDuration(_controller.value.duration),
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 20),
                     ],
                   ),
                 ),
